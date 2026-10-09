@@ -8,10 +8,11 @@ local RNS = game:GetService("RunService")
 -- Packages
 local Knit = require(RS.Packages.Knit)
 local Janitor = require(RS.Packages.Janitor)
-local Ratelimit = require(RS.Packages.Ratelimit)
+local Ratelimit = require(RS.Packages.RateLimit)
 
 -- Modules
 local GameData = require(RS.Utils.GameData)
+local PlaySound = require(RS.Utils.PlaySound)
 
 local BalloonService = Knit.CreateService({
 	Name = "BalloonService",
@@ -307,6 +308,10 @@ function BalloonService:LaunchUpward(player)
 		math.random(-10, 10)
 	)
 
+	if player then
+		PlaySound:PlaySoundWithRandomSpeedInPart("Slap", 0.8, 1.2, player.Character.HumanoidRootPart)
+	end
+
 	return true
 end
 
@@ -346,7 +351,10 @@ function BalloonService:Launch(player, lookVector, power)
 	balloon.AssemblyLinearVelocity = Vector3.zero
 	balloon:ApplyImpulse(dir * balloon.AssemblyMass * speed)
 	balloon.AssemblyAngularVelocity += Vector3.new(dir.Z, 0, -dir.X) * 3
-
+	
+	if player then
+		PlaySound:PlaySoundWithRandomSpeedInPart("Slap", 0.8, 1.2, player.Character.HumanoidRootPart)
+	end
 	return true
 end
 
