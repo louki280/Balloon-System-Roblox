@@ -60,8 +60,6 @@ function BalloonController:RefreshUI()
 end
 
 function BalloonController:LaunchUpward()
-	PlaySound:PlaySoundWithRandomSpeed("Slap", 0.8, 1.2)
-
 	Promise.try(function()
 		return self.BalloonService:LaunchUpward()
 	end):catch(function(err)
@@ -197,7 +195,6 @@ function BalloonController:Release()
 		return
 	end
 
-	PlaySound:PlaySoundWithRandomSpeed("Slap", 0.8, 1.2)
 
 	Promise.try(function()
 		return self.BalloonService:Launch(cam.CFrame.LookVector, power)
