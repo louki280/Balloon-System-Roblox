@@ -20,14 +20,18 @@ local BalloonController = Knit.CreateController({
 local PLR = PLRS.LocalPlayer
 local PlaySound = require(RS.Utils.PlaySound)
 
+-- Same validation logic as the server side.
+-- Keeping this here avoids passing obviously broken values around.
 local function isFiniteNumber(v)
 	return type(v) == "number" and v == v and math.abs(v) ~= math.huge
 end
 
 function BalloonController:RefreshUI()
+	-- HUD can load late or get recreated, so always re-check the live GUI tree.
 	local pg = PLR:FindFirstChildOfClass("PlayerGui")
 	local hud = pg and pg:FindFirstChild("HUD")
 
+	-- If nothing changed and the UI is already ready, there's nothing to rebuild.
 	if hud == self.hud and (not hud or self.uiReady) then
 		return
 	end
@@ -48,6 +52,7 @@ function BalloonController:RefreshUI()
 
 	self.uiReady = true
 
+	-- Support both names because UI names tend to drift over time.
 	local icon = utils:FindFirstChild("HandIcon") or utils:FindFirstChild("SlapIcon")
 	if icon then
 		icon.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -60,6 +65,7 @@ function BalloonController:RefreshUI()
 end
 
 function BalloonController:LaunchUpward()
+	-- Promise keeps the error from breaking the whole input flow.
 	Promise.try(function()
 		return self.BalloonService:LaunchUpward()
 	end):catch(function(err)
@@ -72,6 +78,7 @@ function BalloonController:ShowPower(power)
 		return
 	end
 
+	-- A sound on charge change makes the UI feel less dead.
 	if power then
 		PlaySound:PlaySoundWithRandomSpeed("Tick", 0.8, 1.2)
 	end
@@ -81,6 +88,8 @@ function BalloonController:ShowPower(power)
 		if seg then
 			local scale = seg:FindFirstChildOfClass("UIScale")
 
+			-- The UIScale is created lazily so the UI still works even if
+			-- the segment was added without one.
 			if not scale then
 				scale = Instance.new("UIScale")
 				scale.Scale = 0
@@ -96,7 +105,9 @@ function BalloonController:ShowPower(power)
 				{Scale = value}
 			)
 
-			self.Janitor:Add(tween, "Cancel", "PowerTween" .. i) -- Replacing a charge animation cancels the previous tween for that segment.
+			-- Replacing an old tween prevents multiple charge animations from
+			-- fighting each other on the same segment.
+			self.Janitor:Add(tween, "Cancel", "PowerTween" .. i)
 			tween:Play()
 		end
 	end
@@ -118,9 +129,12 @@ function BalloonController:IsHoveringBalloon()
 		return false
 	end
 
+	-- MouseLocation is already in screen coordinates, so ScreenPointToRay
+	-- is the cleanest way to turn that into a world ray.
 	local mouse = UIS:GetMouseLocation()
-	local ray = cam:ScreenPointToRay(mouse.X, mouse.Y) -- Uses the same screen coordinates returned by GetMouseLocation.
+	local ray = cam:ScreenPointToRay(mouse.X, mouse.Y)
 
+	-- Ignore the local character so the ray doesn't get blocked by your own body.
 	self.rayParams.FilterDescendantsInstances = {char}
 
 	local result = workspace:Raycast(ray.Origin, ray.Direction * 1000, self.rayParams)
@@ -133,6 +147,8 @@ function BalloonController:IsHoveringBalloon()
 		return false
 	end
 
+	-- Range comes from the balloon itself, so different balloons can be
+	-- interacted with from different distances.
 	local range = balloon:GetAttribute("Range") or 16
 	if type(range) ~= "number" or not isFiniteNumber(range) or range <= 0 then
 		range = 16
@@ -158,8 +174,10 @@ function BalloonController:Update()
 		if hovering then
 			local pos = UIS:GetMouseLocation()
 
+			-- IgnoreGuiInset changes the screen offset, so the icon has to
+			-- follow the same coordinate space as the HUD.
 			if self.hud and not self.hud.IgnoreGuiInset then
-				pos -= GS:GetGuiInset() -- Converts screen coordinates to the HUD's coordinates when the inset is ignored.
+				pos -= GS:GetGuiInset()
 			end
 
 			self.handIcon.Position = UDim2.fromOffset(pos.X, pos.Y)
@@ -167,7 +185,9 @@ function BalloonController:Update()
 	end
 
 	if self.charging then
-		local power = math.clamp(1 + math.floor((os.clock() - self.chargeStart) / 0.3), 1, 5) -- Charge increases one level every 0.3 seconds.
+		-- Power climbs in steps instead of a smooth ramp, because discrete
+		-- levels are easier to read and easier to balance.
+		local power = math.clamp(1 + math.floor((os.clock() - self.chargeStart) / 0.3), 1, 5)
 
 		if power ~= self.power then
 			self.power = power
@@ -182,7 +202,10 @@ function BalloonController:Release()
 	end
 
 	local power = self.power
-	local hovering = self:IsHoveringBalloon() -- The cursor may have moved off the balloon while the player was charging.
+
+	-- The cursor might leave the balloon before release, so check again here
+	-- instead of trusting the earlier hover state.
+	local hovering = self:IsHoveringBalloon()
 
 	self:CancelCharge()
 
@@ -195,8 +218,8 @@ function BalloonController:Release()
 		return
 	end
 
-
 	Promise.try(function()
+		-- The server decides whether this throw is allowed.
 		return self.BalloonService:Launch(cam.CFrame.LookVector, power)
 	end):catch(function(err)
 		warn("BalloonController:", err)
@@ -207,17 +230,20 @@ function BalloonController:KnitStart()
 	self.BalloonService = Knit.GetService("BalloonService")
 
 	self.Janitor:Add(UIS.InputBegan:Connect(function(input, gp)
+		-- Ignore input that Roblox already used for something else.
 		if gp then
 			return
 		end
 
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			-- Left click starts a charge instead of firing instantly.
 			self.charging = true
 			self.chargeStart = os.clock()
 			self.power = 1
 			self:ShowPower(1)
 
 		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+			-- Right click is the quick upward throw, so cancel any charge first.
 			self:CancelCharge()
 			self:LaunchUpward()
 		end
@@ -230,7 +256,9 @@ function BalloonController:KnitStart()
 	end))
 
 	self.Janitor:Add(UIS.WindowFocusReleased:Connect(function()
-		self:CancelCharge() -- The release event may never fire if the player clicks outside the game window.
+		-- If the player alt-tabs or clicks outside the window, the release event
+		-- may never arrive. Clearing the charge here avoids stuck input state.
+		self:CancelCharge()
 	end))
 
 	self.Janitor:Add(RNS.RenderStepped:Connect(function()
@@ -243,11 +271,13 @@ function BalloonController:KnitInit()
 	self.power = 1
 	self.chargeStart = 0
 
+	-- Raycast params are reused instead of rebuilt every frame.
 	self.rayParams = RaycastParams.new()
 	self.rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 	self.Janitor = Janitor.new()
 
+	-- Hide the default cursor so the custom hand icon feels intentional.
 	UIS.MouseIconEnabled = false
 end
 
